@@ -4,3 +4,7 @@ loguru
 python3-xid
 asyncpg
 uvloop
+
+aiofile
+ffmpy3
+ffmpeg-python
