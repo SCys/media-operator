@@ -40,9 +40,14 @@ class APIConvert(BasicHandler):
             type = DEFAULT_TYPE
         codec = SUPPORT_TYPES.get(type, SUPPORT_TYPES[DEFAULT_TYPE])
 
-        # mp4 spec encodec
-        if type == "mp4" and "ffmpeg" in self.config:
-            codec = self.config["ffmpeg"].get("mp4_encodec", "h264")
+        if "ffmpeg" in self.config:
+            # mp4 spec encodec
+            if type == "mp4":
+                codec = self.config["ffmpeg"].get("mp4_encodec", "h264")
+
+            executable = self.config["ffmpeg"].get("ffmpeg", "ffmpeg")
+        else:
+            executable = "ffmpeg"
 
         # save upload data
         try:
@@ -81,7 +86,12 @@ class APIConvert(BasicHandler):
         self.d(f"task {id} is started, input:{path_in} output {path_out}")
 
         try:
-            ff = FFmpeg(inputs={path_in: None}, outputs={path_out: f"-c:v {codec} -f {type}"}, global_options=["-v warning"])
+            ff = FFmpeg(
+                executable=executable,
+                inputs={path_in: None},
+                outputs={path_out: f"-c:v {codec} -f {type}"},
+                global_options=["-v warning"],
+            )
             await ff.run_async()
             await ff.wait()
 
