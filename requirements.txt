@@ -1,0 +1,6 @@
+aiohttp
+orjson
+loguru
+python3-xid
+asyncpg
+uvloop
