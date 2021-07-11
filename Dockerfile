@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install --no-install-suggests --no-install-recomme
 
 RUN export ARCH="$(dpkg --print-architecture)" && \
     wget -O /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${ARCH}-static.tar.xz" && \
-    tar xf /tmp/ffmpeg.tar.xz && mv "ffmpeg-4.4-${ARCH} -static" /opt/ffmpeg
+    tar xf /tmp/ffmpeg.tar.xz && mv "ffmpeg-4.4-${ARCH}-static" /opt/ffmpeg
 
 COPY requirements.txt /requirements.txt
 RUN /venv/bin/pip install --disable-pip-version-check -r /requirements.txt
