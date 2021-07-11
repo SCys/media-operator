@@ -1,8 +1,10 @@
-FROM python:3-slim-buster as build
+FROM python:3-buster as build
 RUN python3 -m venv --copies /venv && /venv/bin/pip install --upgrade pip
 
 FROM build AS build-venv
-RUN apt-get update && apt-get install --no-install-suggests --no-install-recommends --yes wget xz-utils
+RUN apt-get update && apt-get install --no-install-suggests --no-install-recommends --yes \
+    wget xz-utils \
+    build-essential autoconf libtool pkg-config
 
 RUN export ARCH="$(dpkg --print-architecture)" && \
     wget -O /tmp/ffmpeg.tar.xz "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${ARCH}-static.tar.xz" && \
