@@ -5,7 +5,7 @@ on:
     branches:
       - "v*.*.*"
   pull_request:
-    branches: [master]
+    branches: ["v*.*.*"]
 
   workflow_dispatch:
 
