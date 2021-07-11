@@ -15,7 +15,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
-      - uses: textbook/git-checkout-submodule-action@master
+      - name: checkout submodule
+        run: |
+          git submodule init
+          git submodule update
 
       - name: Prepare
         id: prep
