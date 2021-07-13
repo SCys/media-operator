@@ -1,4 +1,5 @@
 import os
+import subprocess
 
 from aiofile import AIOFile, Reader, async_open
 from aiohttp.web_response import StreamResponse
@@ -92,7 +93,7 @@ class APIConvert(BasicHandler):
                 outputs={path_out: f"-c:v {codec} -f {type}"},
                 global_options=["-v warning"],
             )
-            await ff.run_async()
+            await ff.run_async(stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             await ff.wait()
 
             self.d(f"task {id} is converted")
