@@ -11,13 +11,6 @@ def main():
         ]
     )
 
-    # setup ffmpeg default config
-    if not app.config.has_section("ffmpeg"):
-        app.config.add_section("ffmpeg")
-
-        app.config["ffmpeg"]["ffmpeg"] = "/opt/ffmpeg/ffmpeg"
-        app.config["ffmpeg"]["ffprobe"] = "/opt/ffmpeg/ffprobe"
-
     app.start()
 
 

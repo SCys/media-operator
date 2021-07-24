@@ -33,9 +33,6 @@ class APIConvert(BasicHandler):
     async def process(self):
         req = self.request
 
-        # do_async = "async" in req.query
-        # url = req.query.get("url")
-
         type = req.query.get("type", DEFAULT_TYPE)
         if type not in SUPPORT_TYPES:
             type = DEFAULT_TYPE
@@ -47,8 +44,6 @@ class APIConvert(BasicHandler):
                 codec = self.config["ffmpeg"].get("mp4_encodec", "h264")
 
             executable = self.config["ffmpeg"].get("ffmpeg", "ffmpeg")
-        else:
-            executable = "ffmpeg"
 
         # save upload data
         try:
@@ -79,10 +74,7 @@ class APIConvert(BasicHandler):
 
         self.d(f"task {id} save data size {pretty_size(size)}")
 
-        # if do_async:
-        #     return {"id": id, "size": size}
-
-        path_out = path_in + ".mp4"
+        path_out = path_in + "." + type
 
         self.d(f"task {id} is started, input:{path_in} output {path_out}")
 
