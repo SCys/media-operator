@@ -130,6 +130,7 @@ dmypy.json
 
 # ide/editor
 .idea
+.vscode
 
 /data
 /log
