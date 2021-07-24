@@ -1,13 +1,17 @@
+from asyncio.subprocess import PIPE
 import os
 import subprocess
-
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 from aiofile import AIOFile, Reader, async_open
-from aiohttp.web_response import StreamResponse
+from aiohttp.web_response import Response, StreamResponse
 from core import BasicHandler
+from core import exception
+from core.exception import InvalidParams, ServerError
 from core.utils import pretty_size
-from core.web import ServerError
 from ffmpy3 import FFmpeg
-from xid import Xid
+import ffmpeg
+from xid import InvalidXid, Xid
 
 DEFAULT_PATH = "data/media/convert"
 LIMIT = 10 * 2 << 29  # limit 10G
@@ -33,22 +37,25 @@ class APIConvert(BasicHandler):
     async def process(self):
         req = self.request
 
-        type = req.query.get("type", DEFAULT_TYPE)
-        if type not in SUPPORT_TYPES:
-            type = DEFAULT_TYPE
+        type_o = req.query.get("type", DEFAULT_TYPE)
+        if type_o not in SUPPORT_TYPES:
+            type_o = DEFAULT_TYPE
 
-        mime_type = SUPPORT_TYPES.get(type)
+        mime_type = SUPPORT_TYPES.get(type_o)
 
-        if "ffmpeg" in self.config:
-            config = self.config["ffmpeg"]
+        config = self.config["ffmpeg"]
 
-            # mp4 spec encodec
-            if type == "mp4":
-                options_global = config.get("mp4_options_global", "")
-                options_input = config.get("mp4_input_options", "")
-                options_output = config.get("mp4_output_options", "-f mp4")
+        options_g = config.get("options_global", "")
+        options_i = ""
+        options_o = ""
 
-            executable = config.get("ffmpeg", "ffmpeg")
+        if type_o == "mp4":
+            options_g = config.get("mp4_options_global", "")
+            options_i = config.get("mp4_input_options", "")
+            options_o = config.get("mp4_output_options", "-f mp4")
+
+        executable = config.get("ffmpeg", "ffmpeg")
+        executable_probe = config.get("ffprobe", "ffprobe")
 
         # save upload data
         try:
@@ -59,12 +66,13 @@ class APIConvert(BasicHandler):
             return ServerError()
 
         id = Xid().string()
-        path_in = os.path.join(DEFAULT_PATH, id)
+        path_i = os.path.join(DEFAULT_PATH, id)
 
         size = 0
 
+        # 保存源到本地
         try:
-            async with async_open(path_in, "wb+") as fobj:
+            async with async_open(path_i, "wb+") as f:
                 async for data in req.content.iter_chunked(2 << 19):  # 1mb
                     size += len(data)
 
@@ -72,51 +80,110 @@ class APIConvert(BasicHandler):
                         self.e(f"task {id} upload size over limit {pretty_size(LIMIT)}")
                         raise ValueError()
 
-                    await fobj.write(data)
-        except:
-            self.x(f"task {id} upload with exception")
+                    await f.write(data)
+        except Exception as e:
+            self.e(f"task {id} upload with exception:{str(e)}")
             return ServerError()
 
-        self.d(f"task {id} save data size {pretty_size(size)}")
+        path_o = path_i + "." + type_o
 
-        path_out = path_in + "." + type
+        try:
+            probe = ffmpeg.probe(path_i, cmd=executable_probe)
+        except Exception as e:
+            self.x(f"task {id} failed:{str(e)}")
+            return
 
-        self.d(
-            f"task {id} is started, input:{path_in} output {path_out}, options {options_input} {options_output} {options_global}"
-        )
+        self.d(f"task {id} is started, input {path_i}({pretty_size(size)}) output {path_o}")
+
+        cost = datetime.now()
 
         try:
             ff = FFmpeg(
                 executable=executable,
-                inputs={path_in: options_input},
-                outputs={path_out: options_output},
-                global_options=options_global,
+                inputs={path_i: options_i},
+                outputs={path_o: options_o},
+                global_options=options_g,
             )
             await ff.run_async(stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             await ff.wait()
-
-            self.d(f"task {id} is converted")
         finally:
-            os.unlink(path_in)
+            os.unlink(path_i)
+
+        cost = (datetime.now() - cost).total_seconds()
+        self.d(f"task {id} is converted, cost {cost}s")
+
+        stat = os.stat(path_o, follow_symlinks=True)
+        headers = {
+            "X-FFmpeg-Cost-Seconds": str(cost),
+            "Content-Type": mime_type,
+            "Content-Length": str(stat.st_size),
+        }
+
+        await self.history_save(id, type_o, size, stat.st_size, probe, cost)
 
         try:
-            stat = os.stat(path_out, follow_symlinks=True)
 
-            resp = StreamResponse()
-            resp.content_length = stat.st_size
-            resp.content_type = mime_type
+            resp = StreamResponse(headers=headers)
 
             await resp.prepare(req)
 
             self.d(f"task {id} is sending to client")
 
-            async with AIOFile(path_out, "rb") as fobj:
-                reader = Reader(fobj, chunk_size=2 << 19)
+            async with AIOFile(path_o, "rb") as f:
+                reader = Reader(f, chunk_size=2 << 19)
 
                 async for data in reader:
                     await resp.write(data)
+        except Exception as e:
+            self.x(f"task {id} stream response failed")
+            return ServerError(500, str(e))
 
-            return resp
         finally:
-            os.unlink(path_out)
+            os.unlink(path_o)
             self.d(f"task {id} is done")
+
+        return resp
+
+    async def history_save(self, id, type_o, size_i, size_o, probe, cost: float):
+        if not self.db:
+            return
+
+        req = self.request
+
+        input_video_codec = None
+        input_audio_codec = None
+        input_width = None
+        input_height = None
+
+        video_stream = next((stream for stream in probe["streams"] if stream["codec_type"] == "video"), None)
+        if video_stream:
+            input_video_codec = video_stream["codec_name"]
+            input_width = video_stream["width"]
+            input_height = video_stream["height"]
+
+        audio_stream = next((stream for stream in probe["streams"] if stream["codec_type"] == "audio"), None)
+        if audio_stream:
+            input_audio_codec = audio_stream["codec_name"]
+
+        try:
+            async with self.db.acquire(timeout=5) as conn:
+                await conn.execute(
+                    """insert into media_history(
+                        id, info,
+                        input_size,input_video_codec,input_audio_codec,input_width,input_height,
+                        output_size,output_video_codec,
+                        cost
+                    ) values(
+                        $1,$2,
+                        $3,$4,$5,$6,$7,
+                        $8,$9,
+                        $10
+                    )
+                    """,
+                    id, {'source': req.remote},
+                    size_i, input_video_codec, input_audio_codec, input_width, input_height,
+                    size_o, type_o,
+                    int(cost * 1000),
+                )
+        except Exception as e:
+            self.e(f"task {id} save history failed:{e}")
