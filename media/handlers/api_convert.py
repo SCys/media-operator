@@ -13,7 +13,7 @@ DEFAULT_PATH = "data/media/convert"
 LIMIT = 10 * 2 << 29  # limit 10G
 
 DEFAULT_TYPE = "mp4"
-SUPPORT_TYPES = {"mp4": "h264", "webm": "vp09"}
+SUPPORT_TYPES = {"mp4": "video/mp4"}
 
 
 class APIConvert(BasicHandler):
@@ -36,14 +36,19 @@ class APIConvert(BasicHandler):
         type = req.query.get("type", DEFAULT_TYPE)
         if type not in SUPPORT_TYPES:
             type = DEFAULT_TYPE
-        codec = SUPPORT_TYPES.get(type, SUPPORT_TYPES[DEFAULT_TYPE])
+
+        mime_type = SUPPORT_TYPES.get(type)
 
         if "ffmpeg" in self.config:
+            config = self.config["ffmpeg"]
+
             # mp4 spec encodec
             if type == "mp4":
-                codec = self.config["ffmpeg"].get("mp4_encodec", "h264")
+                options_global = config.get("mp4_options_global", "")
+                options_input = config.get("mp4_input_options", "")
+                options_output = config.get("mp4_output_options", "-f mp4")
 
-            executable = self.config["ffmpeg"].get("ffmpeg", "ffmpeg")
+            executable = config.get("ffmpeg", "ffmpeg")
 
         # save upload data
         try:
@@ -76,14 +81,16 @@ class APIConvert(BasicHandler):
 
         path_out = path_in + "." + type
 
-        self.d(f"task {id} is started, input:{path_in} output {path_out}")
+        self.d(
+            f"task {id} is started, input:{path_in} output {path_out}, options {options_input} {options_output} {options_global}"
+        )
 
         try:
             ff = FFmpeg(
                 executable=executable,
-                inputs={path_in: None},
-                outputs={path_out: f"-c:v {codec} -f {type}"},
-                global_options=["-v warning"],
+                inputs={path_in: options_input},
+                outputs={path_out: options_output},
+                global_options=options_global,
             )
             await ff.run_async(stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             await ff.wait()
@@ -97,7 +104,7 @@ class APIConvert(BasicHandler):
 
             resp = StreamResponse()
             resp.content_length = stat.st_size
-            resp.content_type = "video/mp4"
+            resp.content_type = mime_type
 
             await resp.prepare(req)
 
