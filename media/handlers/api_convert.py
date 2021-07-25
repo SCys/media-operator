@@ -1,17 +1,16 @@
 from asyncio.subprocess import PIPE
 import os
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 from aiofile import AIOFile, Reader, async_open
-from aiohttp.web_response import Response, StreamResponse
+from aiohttp.web_response import StreamResponse
 from core import BasicHandler
-from core import exception
-from core.exception import InvalidParams, ServerError
+from core.exception import ServerError
 from core.utils import pretty_size
 from ffmpy3 import FFmpeg
 import ffmpeg
-from xid import InvalidXid, Xid
+from xid import Xid
 
 DEFAULT_PATH = "data/media/convert"
 LIMIT = 10 * 2 << 29  # limit 10G
@@ -180,9 +179,15 @@ class APIConvert(BasicHandler):
                         $10
                     )
                     """,
-                    id, {'source': req.remote},
-                    size_i, input_video_codec, input_audio_codec, input_width, input_height,
-                    size_o, type_o,
+                    id,
+                    {"source": req.remote},
+                    size_i,
+                    input_video_codec,
+                    input_audio_codec,
+                    input_width,
+                    input_height,
+                    size_o,
+                    type_o,
                     int(cost * 1000),
                 )
         except Exception as e:
