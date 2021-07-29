@@ -1,15 +1,15 @@
-from asyncio.subprocess import PIPE
 import os
 import subprocess
 from datetime import datetime
-from typing import TYPE_CHECKING
+
+import ffmpeg
+from aiohttp import ClientSession, ClientTimeout
 from aiofile import AIOFile, Reader, async_open
 from aiohttp.web_response import StreamResponse
 from core import BasicHandler
-from core.exception import ServerError
+from core.exception import InvalidParams, ServerError
 from core.utils import pretty_size
 from ffmpy3 import FFmpeg
-import ffmpeg
 from xid import Xid
 
 DEFAULT_PATH = "data/media/convert"
@@ -27,51 +27,48 @@ class APIConvert(BasicHandler):
     - url: if start with http(s) will do a request when async task is done
     """
 
-    async def post(self):
-        await self.process()
-
-    async def put(self):
-        await self.process()
-
-    async def process(self):
+    async def get(self):
         req = self.request
 
-        type_o = req.query.get("type", DEFAULT_TYPE)
-        if type_o not in SUPPORT_TYPES:
-            type_o = DEFAULT_TYPE
+        # download from url
+        url = req.query.get("url")
+        if not url:
+            return InvalidParams()
 
-        mime_type = SUPPORT_TYPES.get(type_o)
-
-        config = self.config["ffmpeg"]
-
-        options_g = config.get("options_global", "")
-        options_i = ""
-        options_o = ""
-
-        if type_o == "mp4":
-            options_g = config.get("mp4_options_global", "")
-            options_i = config.get("mp4_input_options", "")
-            options_o = config.get("mp4_output_options", "-f mp4")
-
-        executable = config.get("ffmpeg", "ffmpeg")
-        executable_probe = config.get("ffprobe", "ffprobe")
-
-        # save upload data
-        try:
-            if not os.path.isdir(DEFAULT_PATH):
-                os.makedirs(DEFAULT_PATH)
-        except OSError:
-            self.w(f"{DEFAULT_PATH} path is not exists")
-            return ServerError()
-
-        id = Xid().string()
-        path_i = os.path.join(DEFAULT_PATH, id)
+        id, path_input, type_output, mime_type = await self.prepare()
 
         size = 0
 
-        # 保存源到本地
+        # download url 60s timeout
         try:
-            async with async_open(path_i, "wb+") as f:
+            self.d(f"downloading url {url}")
+            async with ClientSession(timeout=ClientTimeout(60)) as session:
+                async with session.get(url) as resp:
+                    async with async_open(path_input, "wb+") as f:
+                        async for data in resp.content.iter_chunked(2 << 19):  # 1mb
+                            size += len(data)
+
+                            if size > LIMIT:
+                                self.e(f"task {id} upload size over limit {pretty_size(LIMIT)}")
+                                raise ValueError()
+
+                            await f.write(data)
+        except Exception as e:
+            self.e(f"task {id} upload with exception:{str(e)}")
+            return ServerError()
+
+        await self.process(id, size, type_output, mime_type, path_input)
+
+    async def put(self):
+        req = self.request
+
+        id, path_input, type_output, mime_type = await self.prepare()
+
+        size = 0
+
+        # read request body
+        try:
+            async with async_open(path_input, "wb+") as f:
                 async for data in req.content.iter_chunked(2 << 19):  # 1mb
                     size += len(data)
 
@@ -84,29 +81,70 @@ class APIConvert(BasicHandler):
             self.e(f"task {id} upload with exception:{str(e)}")
             return ServerError()
 
-        path_o = path_i + "." + type_o
+        await self.process(id, size, type_output, mime_type, path_input)
+
+    async def prepare(self):
+        req = self.request
+
+        type_output = req.query.get("type", DEFAULT_TYPE)
+        if type_output not in SUPPORT_TYPES:
+            type_output = DEFAULT_TYPE
+
+        mime_type = SUPPORT_TYPES.get(type_output)
+
+        # save upload data
+        try:
+            if not os.path.isdir(DEFAULT_PATH):
+                os.makedirs(DEFAULT_PATH)
+        except OSError:
+            self.w(f"{DEFAULT_PATH} path is not exists")
+            return ServerError()
+
+        id = Xid().string()
+        path_input = os.path.join(DEFAULT_PATH, id)
+
+        return id, path_input, type_output, mime_type
+
+    async def process(self, id, size, type_output, mime_type, path_input):
+        req = self.request
+
+        config = self.config["ffmpeg"]
+
+        options_g = config.get("options_global", "")
+        options_i = ""
+        options_o = ""
+
+        if type_output == "mp4":
+            options_g = config.get("mp4_options_global", "")
+            options_i = config.get("mp4_input_options", "")
+            options_o = config.get("mp4_output_options", "-f mp4")
+
+        executable = config.get("ffmpeg", "ffmpeg")
+        executable_probe = config.get("ffprobe", "ffprobe")
+
+        path_o = path_input + "." + type_output
 
         try:
-            probe = ffmpeg.probe(path_i, cmd=executable_probe)
+            probe = ffmpeg.probe(path_input, cmd=executable_probe)
         except Exception as e:
             self.x(f"task {id} failed:{str(e)}")
             return
 
-        self.d(f"task {id} is started, input {path_i}({pretty_size(size)}) output {path_o}")
+        self.d(f"task {id} is started, input {path_input}({pretty_size(size)}) output {path_o}")
 
         cost = datetime.now()
 
         try:
             ff = FFmpeg(
                 executable=executable,
-                inputs={path_i: options_i},
+                inputs={path_input: options_i},
                 outputs={path_o: options_o},
                 global_options=options_g,
             )
             await ff.run_async(stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             await ff.wait()
         finally:
-            os.unlink(path_i)
+            os.unlink(path_input)
 
         cost = (datetime.now() - cost).total_seconds()
         self.d(f"task {id} is converted, cost {cost}s")
@@ -118,7 +156,7 @@ class APIConvert(BasicHandler):
             "Content-Length": str(stat.st_size),
         }
 
-        await self.history_save(id, type_o, size, stat.st_size, probe, cost)
+        await self.history_save(id, type_output, size, stat.st_size, probe, cost)
 
         try:
 
