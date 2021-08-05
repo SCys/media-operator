@@ -3,20 +3,17 @@ import subprocess
 from datetime import datetime
 
 import ffmpeg
-from aiohttp import ClientSession, ClientTimeout
 from aiofile import AIOFile, Reader, async_open
 from aiohttp.web_response import StreamResponse
 from core import BasicHandler
 from core.exception import InvalidParams, ServerError
-from core.utils import pretty_size
+from core.utils import download_to_path, pretty_size
 from ffmpy3 import FFmpeg
 from xid import Xid
 
-DEFAULT_PATH = "data/media/convert"
-LIMIT = 10 * 2 << 29  # limit 10G
+from .utils import prepare
 
-DEFAULT_TYPE = "mp4"
-SUPPORT_TYPES = {"mp4": "video/mp4"}
+LIMIT = 10 * 2 << 29  # limit 10G
 
 
 class APIConvert(BasicHandler):
@@ -28,31 +25,19 @@ class APIConvert(BasicHandler):
     """
 
     async def get(self):
-        req = self.request
-
         # download from url
-        url = req.query.get("url")
+        url = self.request.query.get("url")
         if not url:
             return InvalidParams()
 
-        id, path_input, type_output, mime_type = await self.prepare()
+        id, path_input, type_output, mime_type = await prepare(self)
 
         size = 0
 
-        # download url 60s timeout
         try:
-            self.d(f"downloading url {url}")
-            async with ClientSession(timeout=ClientTimeout(60)) as session:
-                async with session.get(url) as resp:
-                    async with async_open(path_input, "wb+") as f:
-                        async for data in resp.content.iter_chunked(2 << 19):  # 1mb
-                            size += len(data)
-
-                            if size > LIMIT:
-                                self.e(f"task {id} upload size over limit {pretty_size(LIMIT)}")
-                                raise ValueError()
-
-                            await f.write(data)
+            self.d(f"downloading {url}")
+            await download_to_path(url, path_input, timeout=60, limit=LIMIT)
+            self.i(f"downloaded {url}")
         except Exception as e:
             self.e(f"task {id} upload with exception:{str(e)}")
             return ServerError()
@@ -60,16 +45,14 @@ class APIConvert(BasicHandler):
         await self.process(id, size, type_output, mime_type, path_input)
 
     async def put(self):
-        req = self.request
-
-        id, path_input, type_output, mime_type = await self.prepare()
+        id, path_input, type_output, mime_type = await prepare(self)
 
         size = 0
 
         # read request body
         try:
             async with async_open(path_input, "wb+") as f:
-                async for data in req.content.iter_chunked(2 << 19):  # 1mb
+                async for data in self.request.content.iter_chunked(2 << 19):  # 1mb
                     size += len(data)
 
                     if size > LIMIT:
@@ -82,28 +65,6 @@ class APIConvert(BasicHandler):
             return ServerError()
 
         await self.process(id, size, type_output, mime_type, path_input)
-
-    async def prepare(self):
-        req = self.request
-
-        type_output = req.query.get("type", DEFAULT_TYPE)
-        if type_output not in SUPPORT_TYPES:
-            type_output = DEFAULT_TYPE
-
-        mime_type = SUPPORT_TYPES.get(type_output)
-
-        # save upload data
-        try:
-            if not os.path.isdir(DEFAULT_PATH):
-                os.makedirs(DEFAULT_PATH)
-        except OSError:
-            self.w(f"{DEFAULT_PATH} path is not exists")
-            return ServerError()
-
-        id = Xid().string()
-        path_input = os.path.join(DEFAULT_PATH, id)
-
-        return id, path_input, type_output, mime_type
 
     async def process(self, id, size, type_output, mime_type, path_input):
         req = self.request
