@@ -1,8 +1,7 @@
-from core.web import BasicHandler
 import os
 
-from aiohttp.web import Request
 from core.exception import ServerError
+from core.web import BasicHandler
 from xid import Xid
 
 DEFAULT_TYPE = "mp4"

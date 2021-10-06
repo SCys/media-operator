@@ -3,11 +3,9 @@ import os
 import ffmpeg
 from aiofile import async_open
 from core import BasicHandler
-from core.exception import InvalidParams, ObjectNotFound, ServerError
+from core.exception import InvalidParams, ServerError
 from core.utils import download_to_path, pretty_size
 from xid import Xid
-
-from .utils import prepare
 
 DEFAULT_PATH = "data/media/probe"
 LIMIT = 10 * 2 << 29  # limit 10G

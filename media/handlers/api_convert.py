@@ -9,7 +9,6 @@ from core import BasicHandler
 from core.exception import InvalidParams, ServerError
 from core.utils import download_to_path, pretty_size
 from ffmpy3 import FFmpeg
-from xid import Xid
 
 from .utils import prepare
 
