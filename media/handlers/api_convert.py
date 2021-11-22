@@ -29,7 +29,7 @@ class APIConvert(BasicHandler):
         if not url:
             return InvalidParams()
 
-        id, path_input, type_output, mime_type = await prepare(self)
+        task, path_input, type_output, mime_type = await prepare(self)
 
         size = 0
 
@@ -38,13 +38,13 @@ class APIConvert(BasicHandler):
             await download_to_path(url, path_input, timeout=60, limit=LIMIT)
             self.i(f"downloaded {url}")
         except Exception as e:
-            self.e(f"task {id} upload with exception:{str(e)}")
+            self.e(f"task {task} upload with exception:{str(e)}")
             return ServerError()
 
-        await self.process(id, size, type_output, mime_type, path_input)
+        await self.process(task, size, type_output, mime_type, path_input)
 
     async def put(self):
-        id, path_input, type_output, mime_type = await prepare(self)
+        task, path_input, type_output, mime_type = await prepare(self)
 
         size = 0
 
@@ -55,17 +55,17 @@ class APIConvert(BasicHandler):
                     size += len(data)
 
                     if size > LIMIT:
-                        self.e(f"task {id} upload size over limit {pretty_size(LIMIT)}")
+                        self.e(f"task {task} upload size over limit {pretty_size(LIMIT)}")
                         raise ValueError()
 
                     await f.write(data)
         except Exception as e:
-            self.e(f"task {id} upload with exception:{str(e)}")
+            self.e(f"task {task} upload with exception:{str(e)}")
             return ServerError()
 
-        await self.process(id, size, type_output, mime_type, path_input)
+        await self.process(task, size, type_output, mime_type, path_input)
 
-    async def process(self, id, size, type_output, mime_type, path_input):
+    async def process(self, task, size, type_output, mime_type, path_input):
         req = self.request
 
         config = self.config["ffmpeg"]
@@ -87,10 +87,10 @@ class APIConvert(BasicHandler):
         try:
             probe = ffmpeg.probe(path_input, cmd=executable_probe)
         except Exception as e:
-            self.x(f"task {id} failed:{str(e)}")
+            self.x(f"task {task} failed:{str(e)}")
             return
 
-        self.d(f"task {id} is started, input {path_input}({pretty_size(size)}) output {path_o}")
+        self.d(f"task {task} is started, input {path_input}({pretty_size(size)}) output {path_o}")
 
         cost = datetime.now()
 
@@ -107,7 +107,7 @@ class APIConvert(BasicHandler):
             os.unlink(path_input)
 
         cost = (datetime.now() - cost).total_seconds()
-        self.d(f"task {id} is converted, cost {cost}s")
+        self.d(f"task {task} is converted, cost {cost}s")
 
         stat = os.stat(path_o, follow_symlinks=True)
         headers = {
@@ -116,7 +116,7 @@ class APIConvert(BasicHandler):
             "Content-Length": str(stat.st_size),
         }
 
-        await self.history_save(id, type_output, size, stat.st_size, probe, cost)
+        await self.history_save(task, type_output, size, stat.st_size, probe, cost)
 
         try:
 
@@ -124,7 +124,7 @@ class APIConvert(BasicHandler):
 
             await resp.prepare(req)
 
-            self.d(f"task {id} is sending to client")
+            self.d(f"task {task} is sending to client")
 
             async with AIOFile(path_o, "rb") as f:
                 reader = Reader(f, chunk_size=2 << 19)
@@ -132,16 +132,16 @@ class APIConvert(BasicHandler):
                 async for data in reader:
                     await resp.write(data)
         except Exception as e:
-            self.x(f"task {id} stream response failed")
+            self.x(f"task {task} stream response failed")
             return ServerError(500, str(e))
 
         finally:
             os.unlink(path_o)
-            self.d(f"task {id} is done")
+            self.d(f"task {task} is done")
 
         return resp
 
-    async def history_save(self, id, type_o, size_i, size_o, probe, cost: float):
+    async def history_save(self, task, type_o, size_i, size_o, probe, cost: float):
         if not self.db:
             return
 
@@ -177,7 +177,7 @@ class APIConvert(BasicHandler):
                         $10
                     )
                     """,
-                    id,
+                    task,
                     {"source": req.remote},
                     size_i,
                     input_video_codec,
@@ -189,4 +189,4 @@ class APIConvert(BasicHandler):
                     int(cost * 1000),
                 )
         except Exception as e:
-            self.e(f"task {id} save history failed:{e}")
+            self.e(f"task {task} save history failed:{e}")
