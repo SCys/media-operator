@@ -4,7 +4,7 @@ from core.exception import ServerError
 from core.web import BasicHandler
 from xid import Xid
 
-DEFAULT_TYPE = "mkv"
+DEFAULT_TYPE = "mp4"
 SUPPORT_TYPES = {"mp4": "video/mp4", "mkv": "video/x-matroska"}
 DEFAULT_PATH = "data/media/convert"
 
