@@ -38,7 +38,7 @@ class APIConvert(BasicHandler):
             await download_to_path(url, path_input, timeout=60, limit=LIMIT)
             self.i(f"downloaded {url}")
         except Exception as e:
-            self.e(f"task {task} upload with exception:{str(e)}")
+            self.x(f"task {task} upload with exception")
             return ServerError()
 
         await self.process(task, size, type_output, mime_type, path_input)
@@ -78,6 +78,13 @@ class APIConvert(BasicHandler):
             options_g = config.get("mp4_options_global", "")
             options_i = config.get("mp4_input_options", "")
             options_o = config.get("mp4_output_options", "-f mp4")
+        elif type_output == "mkv":
+            options_g = config.get("mkv_options_global", "")
+            options_i = config.get("mkv_input_options", "")
+            options_o = config.get("mkv_output_options", "-f mkv")
+        else:
+            self.w(f"task {task} unsupported output type:{type_output}")
+            raise InvalidParams()
 
         executable = config.get("ffmpeg", "ffmpeg")
         executable_probe = config.get("ffprobe", "ffprobe")

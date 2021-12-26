@@ -8,7 +8,8 @@ def main():
         [
             (r"/api/media/convert", media.handlers.APIConvert),
             (r"/api/media/probe", media.handlers.APIProbe),
-        ]
+        ],
+        client_max_size=2 << 32,  # 8G
     )
 
     app.start()
