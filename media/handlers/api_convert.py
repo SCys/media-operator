@@ -43,7 +43,7 @@ class APIConvert(BasicHandler):
 
         await self.process(task, size, type_output, mime_type, path_input)
 
-    async def put(self):
+    async def post(self):
         task, path_input, type_output, mime_type = await prepare(self)
 
         size = 0
